@@ -10,7 +10,7 @@
 
 2. Определим адресацию сетевой лаборатории.
 
-![alt text](/screenshots/hw17-2.PNG?raw=true "Screenshot2")
+    ![alt text](/screenshots/hw17-2.PNG?raw=true "Screenshot2")
 
 3. Определим сетевую схему.
 ![alt text](/screenshots/hw17-3.PNG?raw=true "Screenshot3")
