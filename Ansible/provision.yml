@@ -1,0 +1,240 @@
+---
+
+- name: Config Servers
+  hosts: Servers
+  gather_facts: no
+  become: true
+
+#################################  inetRouter Configuration   ##########################################
+  tasks:
+    - name: Set up NAT on inetRouter
+      block:
+        - name: install iptables on inetRouter
+          yum:        
+            name:
+              - iptables
+              - iptables-services
+            state: present
+            update_cache: true
+              
+        - name: copy iptables config on inetRouter
+          template:
+            src: templates/iptables_inetRouter.j2
+            dest: /etc/sysconfig/iptables
+            owner: root
+            group: root
+            mode: 0600
+            
+        - name: start and enable iptables service on inetRouter
+          service:
+            name: iptables
+            state: restarted
+            enabled: true
+        
+        - name: set up route on inetRouter eth1
+          template:
+            src: templates/inetRouter_route_eth1.j2
+            dest: /etc/sysconfig/network-scripts/route-eth1
+            owner: root
+            group: root
+            mode: 0644
+        
+        - name: restart network service on inetRouter
+          service:
+            name: network
+            state: restarted
+      when: inventory_hostname == "inetRouter"
+
+#################################  Routing Configuration on Routers   ##########################################
+    - name: set up forward packages across routers
+      sysctl:
+        name: net.ipv4.conf.all.forwarding
+        value: '1'
+        state: present
+      when: "'routers' in group_names"  
+
+#################################  centralRouter Configuration   ##########################################
+    - name: centralRouter Configuration
+      block:
+        - name: disable default route for centralRouter
+          lineinfile:
+            dest: /etc/sysconfig/network-scripts/ifcfg-eth0
+            line: DEFROUTE=no
+
+        - name: add default gateway for centralRouter
+          lineinfile:
+            dest: /etc/sysconfig/network-scripts/ifcfg-eth1
+            line: GATEWAY=192.168.255.1
+
+        - name: set up route on centralRouter eth5
+          template:
+            src: templates/centralRouter_route_eth5.j2
+            dest: /etc/sysconfig/network-scripts/route-eth5
+            owner: root
+            group: root
+            mode: 0644
+        
+        - name: set up route on centralRouter eth6
+          template:
+            src: templates/centralRouter_route_eth6.j2
+            dest: /etc/sysconfig/network-scripts/route-eth6
+            owner: root
+            group: root
+            mode: 0644
+
+        - name: restart network service on centralRouter
+          service:
+            name: network
+            state: restarted
+      when: inventory_hostname == "centralRouter"
+
+#################################  centralServer Configuration   ##########################################
+    - name: centralServer Configuration
+      block:
+        - name: disable default route for centralServer
+          lineinfile:
+            dest: /etc/sysconfig/network-scripts/ifcfg-eth0
+            line: DEFROUTE=no
+
+        - name: add default gateway for centralServer
+          lineinfile:
+            dest: /etc/sysconfig/network-scripts/ifcfg-eth1
+            line: GATEWAY=192.168.0.1
+
+        - name: restart network service on centralServer
+          service:
+            name: network
+            state: restarted
+      when: inventory_hostname == "centralServer"      
+
+#################################  office1Router Configuration   ##########################################
+    - name: office1Router Configuration
+      block:
+        - name: set up route on office1Router
+          template:
+            src: templates/office1Router_50-vagrant.j2
+            dest: /etc/netplan/50-vagrant.yaml
+            owner: root
+            group: root
+            mode: 0644
+
+        - name: Apply netplan on office1Router
+          command: sudo netplan apply
+          ignore_errors: true
+      when: inventory_hostname == "office1Router"  
+
+#################################  office1Server Configuration   ##########################################
+    - name: office1Server Configuration
+      block:
+        - name: set up route on office1Server
+          template:
+            src: templates/office1Server_50-vagrant.j2
+            dest: /etc/netplan/50-vagrant.yaml
+            owner: root
+            group: root
+            mode: 0644
+
+        - name: Apply netplan on office1Server
+          command: sudo netplan apply
+          ignore_errors: true
+      when: inventory_hostname == "office1Server"  
+
+#################################  office2Router Configuration   ##########################################
+    - name: office2Router Configuration
+      block:
+        - name: set up route on office2Router
+          template:
+            src: templates/office2Router_interfaces.j2
+            dest: /etc/network/interfaces
+            owner: root
+            group: root
+            mode: 0644
+
+        - name: restart network service on office2Router
+          service:
+            name: networking
+            state: restarted
+      when: inventory_hostname == "office2Router"
+
+#################################  office2Server Configuration   ##########################################
+    - name: office2Server Configuration
+      block:
+        - name: set up route on office2Server
+          template:
+            src: templates/office2Server_interfaces.j2
+            dest: /etc/network/interfaces
+            owner: root
+            group: root
+            mode: 0644
+
+        - name: restart network service on office2Server
+          service:
+            name: networking
+            state: restarted
+      when: inventory_hostname == "office2Server"
+
+#################################  Reboot all servers ##########################################      
+    - name: Reboot all servers
+      reboot:
+      tags:
+        - reboot      
+
+#################################  Install traceroute  ##########################################
+    - name: Install traceroute on Centos_srv
+      yum:
+        name: traceroute
+        state: present
+      when: inventory_hostname == "inetRouter" or inventory_hostname == "centralRouter" or inventory_hostname == "centralServer"  
+
+    - name: Update_cache on Ubuntu_srv
+      apt:
+        upgrade: yes
+        update_cache: yes
+      when: inventory_hostname == "office1Router" or inventory_hostname == "office1Server"  
+
+    - name: Install inetutils-traceroute on Ubuntu_srv    
+      apt:
+        name: inetutils-traceroute
+        state: present
+      when: inventory_hostname == "office1Router" or inventory_hostname == "office1Server"      
+
+    - name: Install traceroute on Debian_srv
+      apt:
+        name: traceroute
+        state: present
+      when: inventory_hostname == "office2Router" or inventory_hostname == "office2Server"
+
+#################################  Checking network connectivity ########################################## 
+    - name: Checking by ping and traceroute
+      block:
+        - name: Ping Executing
+          shell: "ping -c 2 {{ item.ip }}"
+          loop: 
+            - { server: 'inetRouter', ip: 192.168.255.1 }
+            - { server: 'centralRouter', ip: 192.168.255.2 }
+            - { server: 'office1Router', ip: 192.168.255.10 }
+            - { server: 'office2Router', ip: 192.168.255.6 }
+            - { server: 'centralServer', ip: 192.168.0.2 }
+            - { server: 'office1Server', ip: 192.168.2.130 }
+          register: command_output
+          ignore_errors: yes
+          no_log: true
+          changed_when: false
+
+        - name: Ping Report
+          debug: 
+            msg: "PING SUCCESS"
+          when: item.rc == 0
+          loop: "{{ command_output.results }}"
+          loop_control: 
+            label: "{{ item.item }}"    
+
+        - name: Execute traceroute
+          shell: "sudo traceroute ya.ru"
+          register: result  
+
+        - name: Traceroute Report
+          debug:
+            msg: "{{ result['stdout_lines'] }}"                 
+      tags:
+        - test_net
